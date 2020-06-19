@@ -62,7 +62,7 @@ func main() {
 			res := string(bytes)
 
 			// check
-			status := strings.Contains(res, "ATCButton")
+			status := strings.Contains(res, config["keyword"])
 			fmt.Printf("status=%v\n", status)
 			if status {
 				sendMail(config["from"], config["title"], strconv.FormatBool(status), config["to"])
