@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robfig/cron/v3"
 	"gopkg.in/gomail.v2"
 )
 
@@ -40,46 +42,59 @@ func main() {
 	}
 	err = json.Unmarshal(bytes, &config)
 
-	// download
-	res, err := http.Get(config["url"])
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer res.Body.Close()
+	// cron
+	c := cron.New(cron.WithSeconds()) // add seconds to standard cron
+	c.AddFunc(config["cron"], func() {
+		fmt.Println("working...")
 
-	if res.StatusCode == http.StatusOK {
-		bytes, err := ioutil.ReadAll(res.Body)
+		// download
+		res, err := http.Get(config["url"])
 		if err != nil {
 			log.Fatal(err)
 		}
-		res := string(bytes)
+		defer res.Body.Close()
 
-		// check
-		status := strings.Contains(res, "ATCButton")
-		fmt.Printf("status=%v\n", status)
-		sendMail(config["user"], config["user"], "gonike", strconv.FormatBool(status))
+		if res.StatusCode == http.StatusOK {
+			bytes, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				log.Fatal(err)
+			}
+			res := string(bytes)
 
-	} else {
-		log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
-	}
+			// check
+			status := strings.Contains(res, "ATCButton")
+			fmt.Printf("status=%v\n", status)
+			if status {
+				sendMail(config["from"], config["title"], strconv.FormatBool(status), config["to"])
+			}
 
+		} else {
+			log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
+		}
+	})
+	c.Start()
+	select {} // keep main alive
 }
 
-func sendMail(to string, from, title, body string) error {
+func sendMail(from, title, body, to string) error {
 	mail := gomail.NewMessage()
 	mail.SetHeader(`From`, from)
-	mail.SetHeader(`To`, to)
 	mail.SetHeader(`Subject`, title)
 	mail.SetBody(`text/html`, body)
+	mail.SetHeader(`To`, to)
 
 	host := config["host"]
 	port, _ := strconv.Atoi(config["port"])
-	user := config["user"]
+	user := config["from"]
 	password := config["password"]
 
-	err := gomail.NewDialer(host, port, user, password).DialAndSend(mail)
+	sender := gomail.NewDialer(host, port, user, password)
+	sender.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+
+	err := sender.DialAndSend(mail)
 	if err != nil {
 		fmt.Println(err)
 	}
+	fmt.Printf("mail sent to=%s\n", to)
 	return err
 }
